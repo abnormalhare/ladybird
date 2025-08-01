@@ -6,7 +6,9 @@
  */
 
 #include <AK/StringBuilder.h>
+#include <AK/StringUtils.h>
 #include <LibJS/Runtime/NativeFunction.h>
+#include <LibJS/Runtime/Value.h>
 #include <LibWeb/ARIA/Roles.h>
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/Bindings/HTMLElementPrototype.h>
@@ -19,6 +21,7 @@
 #include <LibWeb/DOM/LiveNodeList.h>
 #include <LibWeb/DOM/Position.h>
 #include <LibWeb/DOM/ShadowRoot.h>
+#include <LibWeb/HTML/AttributeNames.h>
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/CloseWatcher.h>
 #include <LibWeb/HTML/CustomElements/CustomElementDefinition.h>
@@ -30,7 +33,10 @@
 #include <LibWeb/HTML/HTMLBodyElement.h>
 #include <LibWeb/HTML/HTMLDialogElement.h>
 #include <LibWeb/HTML/HTMLElement.h>
+#include <LibWeb/HTML/HTMLImageElement.h>
 #include <LibWeb/HTML/HTMLLabelElement.h>
+#include <LibWeb/HTML/HTMLLinkElement.h>
+#include <LibWeb/HTML/HTMLObjectElement.h>
 #include <LibWeb/HTML/HTMLParagraphElement.h>
 #include <LibWeb/HTML/PopoverInvokerElement.h>
 #include <LibWeb/HTML/ToggleEvent.h>
@@ -1182,6 +1188,83 @@ WebIDL::ExceptionOr<void> HTMLElement::set_popover(Optional<String> value)
         return set_attribute(HTML::AttributeNames::popover, value.release_value());
 
     remove_attribute(HTML::AttributeNames::popover);
+    return {};
+}
+
+bool HTMLElement::represents_an_image() const
+{
+    if (const auto *object = as_if<HTMLObjectElement>(this)) {
+        return object->type().starts_with_bytes("image/"sv, AK::CaseSensitivity::CaseSensitive);
+    }
+
+    return false;
+}
+
+bool HTMLElement::has_href_attribute() const
+{
+    if (const auto *object = as_if<HTMLLinkElement>(this)) {
+        return object->has_attribute(HTML::AttributeNames::href);
+    }
+
+    return false;
+}
+
+bool HTMLElement::default_draggable_value() const
+{
+    // If the element is an img element, 
+    if (is<HTMLImageElement>(this)) {
+        return true;
+    }
+
+    // an object element that represents an image, 
+    if (represents_an_image()) {
+        return true;
+    }
+
+    // or an a element with an href content attribute, the draggable IDL attribute must return true;
+    if (has_href_attribute()) {
+        return true;
+    }
+
+    //  otherwise, the draggable IDL attribute must return false.
+    return false;
+}
+
+// https://html.spec.whatwg.org/multipage/dnd.html#attr-draggable
+bool HTMLElement::draggable() const
+{
+    auto value = get_attribute(HTML::AttributeNames::draggable);
+    
+    // Otherwise, the element's draggable content attribute has the state Auto.
+    if (!value.has_value() || value.value().is_empty()) {
+        return default_draggable_value();
+    }
+
+    // Otherwise, if the element's draggable content attribute has the state False,
+    //   the draggable IDL attribute must return false.
+    if (value.value().equals_ignoring_ascii_case("true"sv)) {
+        return true;
+    }
+
+    // If an element's draggable content attribute has the state True,
+    //   the draggable IDL attribute must return true.
+    if (value.value().equals_ignoring_ascii_case("false"sv)) {
+        return false;
+    }
+
+    // Otherwise, the element's draggable content attribute has the state Auto.
+    return default_draggable_value();
+}
+
+// https://html.spec.whatwg.org/multipage/dnd.html#attr-draggable
+WebIDL::ExceptionOr<void> HTMLElement::set_draggable(Optional<bool> value)
+{
+    if (value.has_value()) {
+        String literal_value = MUST(String::formatted("{}", value.release_value()));
+        return set_attribute(HTML::AttributeNames::draggable, literal_value);
+    }
+
+    remove_attribute(HTML::AttributeNames::draggable);
     return {};
 }
 

@@ -134,6 +134,13 @@ public:
     Optional<String> popover() const;
     Optional<String> opened_in_popover_mode() const { return m_opened_in_popover_mode; }
 
+    bool represents_an_image() const;
+    bool has_href_attribute() const;
+
+    bool default_draggable_value() const;
+    bool draggable() const;
+    WebIDL::ExceptionOr<void> set_draggable(Optional<bool> value);
+
     virtual void removed_from(Node* old_parent, Node& old_root) override;
 
     enum class PopoverVisibilityState {
