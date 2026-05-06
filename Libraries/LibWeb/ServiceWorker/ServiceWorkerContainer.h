@@ -40,6 +40,8 @@ public:
 
     GC::Ref<WebIDL::Promise> get_registration(String const& client_url);
 
+    GC::Ref<WebIDL::Promise> get_registrations();
+
     GC::Ref<WebIDL::Promise> ready();
 
 #undef __ENUMERATE

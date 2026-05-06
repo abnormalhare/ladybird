@@ -5,12 +5,22 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include "AK/Vector.h"
+#include <AK/Array.h>
+#include <AK/Types.h>
+#include <LibGC/Function.h>
+#include <LibGC/HeapVector.h>
+#include <LibGC/Ptr.h>
+#include <LibJS/Runtime/Array.h>
+#include <LibJS/Runtime/Object.h>
 #include <LibJS/Runtime/Realm.h>
+#include <LibJS/Runtime/Value.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Bindings/ServiceWorkerContainer.h>
 #include <LibWeb/DOMURL/DOMURL.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/EventNames.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
 #include <LibWeb/Platform/EventLoopPlugin.h>
 #include <LibWeb/ServiceWorker/Job.h>
@@ -22,6 +32,8 @@
 #include <LibWeb/TrustedTypes/RequireTrustedTypesForDirective.h>
 #include <LibWeb/TrustedTypes/TrustedScriptURL.h>
 #include <LibWeb/TrustedTypes/TrustedTypePolicy.h>
+#include <LibWeb/WebIDL/Promise.h>
+#include <algorithm>
 
 namespace Web::ServiceWorker {
 
@@ -145,6 +157,59 @@ GC::Ref<WebIDL::Promise> ServiceWorkerContainer::get_registration(String const& 
         // 3. Resolve promise with the result of getting the service worker registration object that represents registration in promise’s relevant settings object.
         auto registration_object = HTML::relevant_settings_object(promise->promise()).get_service_worker_registration_object(maybe_registration.value());
         WebIDL::resolve_promise(realm, promise, registration_object);
+    }));
+
+    return promise;
+}
+
+// https://w3c.github.io/ServiceWorker/#navigator-service-worker-getRegistrations
+GC::Ref<WebIDL::Promise> ServiceWorkerContainer::get_registrations()
+{
+    auto& realm = this->realm();
+
+    // 1. Let client be this’s service worker client.
+    auto client = m_service_worker_client;
+
+    // 2. Let client storage key be the result of running obtain a storage key given client.
+    auto storage_key = StorageAPI::obtain_a_storage_key(client);
+
+    // FIXME: Ad-Hoc. Spec should handle this failure.
+    if (!storage_key.has_value())
+        return WebIDL::create_rejected_promise(realm, JS::TypeError::create(realm, "Failed to obtain a storage key"sv));
+
+    // 3. Let promise be a new promise.
+    auto promise = WebIDL::create_promise(realm);
+
+    // 4. Run the following steps in parallel:
+    Platform::EventLoopPlugin::the().deferred_invoke(GC::create_function(realm.heap(), [&realm, promise, storage_key]() {
+        // 1. Let registrations be a new list.
+        Vector<Registration&> registrations;
+
+        // 2. For each (storage key, scope) → registration of registration map:
+        auto maybe_registration = Registration::get(storage_key.value(), {});
+
+        //   1. If storage key equals client storage key, then append registration to registrations.
+        if (maybe_registration.has_value()) {
+            registrations.append(maybe_registration.value());
+        }
+
+        // 3. Queue a task on promise’s relevant settings object’s responsible event loop, using the DOM manipulation task source, to run the following steps:
+        HTML::queue_a_task(HTML::Task::Source::DOMManipulation, nullptr, nullptr, GC::create_function(realm.heap(), [&realm, promise, registrations]() {
+            // 1. Let registrationObjects be a new list.
+            auto registration_objects = realm.heap().allocate<GC::HeapVector<JS::Value>>();
+
+            // 2. For each registration of registrations:
+            for (const auto& registration : registrations) {
+                // 1. Let registrationObj be the result of getting the service worker registration object that represents registration in promise’s relevant settings object.
+                auto registration_obj = HTML::relevant_settings_object(promise->promise()).get_service_worker_registration_object(registration);
+
+                // 2. Append registrationObj to registrationObjects.
+                registration_objects->elements().append(registration_obj);
+            }
+
+            // 3. Resolve promise with a new frozen array of registrationObjects in promise’s relevant Realm.
+            WebIDL::resolve_promise(realm, promise, JS::Array::create_from(realm, registration_objects->elements()));
+        }));
     }));
 
     return promise;
